@@ -1,7 +1,7 @@
 using System;
 using System.Collections;
 using UnityEngine;
-using UnityEngine.UI;
+using UI = UnityEngine.UI;
 using UnityEngine.EventSystems;
 using System.Reflection;
 
@@ -21,6 +21,9 @@ public class TurnBasedManager : MonoBehaviour
 
     public float StepDelay = 0.25f;
 
+    // Retardo entre turnos cuando _continuous == true (evita cambios instantáneos)
+    public float ContinuousTurnDelay = 0.15f;
+
     private bool _isExecuting = false;
     private bool _runOnce = false;
     private bool _continuous = false;
@@ -34,12 +37,21 @@ public class TurnBasedManager : MonoBehaviour
     // UI runtime references
     private Canvas _canvasA;
     private Canvas _canvasB;
-    private InputField _inputA;
-    private InputField _inputB;
-    private Button _execButtonA;
-    private Button _execButtonB;
-    private Button _contButtonA;
-    private Button _contButtonB;
+    private UI.InputField _inputA;
+    private UI.InputField _inputB;
+    private UI.Button _execButtonA;
+    private UI.Button _execButtonB;
+    private UI.Button _contButtonA;
+    private UI.Button _contButtonB;
+
+    // Turn system
+    private enum Turn { PlayerA, PlayerB }
+    private Turn _currentTurn = Turn.PlayerA;
+
+    // Tiempo por turno (segundos)
+    public float EditTimeLimit = 30f;
+    private bool _isEditing = false;
+    private Coroutine _turnTimerCoroutine;
 
     // Sobrecarga para compatibilidad: Initialize con sólo los dos personajes.
     public void Initialize(Character a, Character b)
@@ -82,7 +94,7 @@ public class TurnBasedManager : MonoBehaviour
         _playerB.manager = this;
 
         // LOG: confirmar llamada y cámaras recibidas
-        Debug.Log($"TurnBasedManager.Initialize called. camA={(camA!=null?camA.name:"null")}, camB={(camB!=null?camB.name:"null")}");
+        Debug.Log($"TurnBasedManager.Initialize called. camA={(camA != null ? camA.name : "null")}, camB={(camB != null ? camB.name : "null")}");
 
         EnsureEventSystemExists();
 
@@ -91,7 +103,7 @@ public class TurnBasedManager : MonoBehaviour
         _canvasB = CreateCanvasForCamera(camB, "Player B Controls", out _inputB, out _execButtonB, out _contButtonB);
 
         // LOG: verificar creación de canvases
-        Debug.Log($"Canvas created: A={(_canvasA!=null?_canvasA.gameObject.name:"null")}, B={(_canvasB!=null?_canvasB.gameObject.name:"null")}");
+        Debug.Log($"Canvas created: A={(_canvasA != null ? _canvasA.gameObject.name : "null")}, B={(_canvasB != null ? _canvasB.gameObject.name : "null")}");
 
         // Inicializar textos
         if (_inputA != null) _inputA.text = PlayerAScript;
@@ -101,13 +113,21 @@ public class TurnBasedManager : MonoBehaviour
         if (_inputA != null) _inputA.onValueChanged.AddListener(val => PlayerAScript = val);
         if (_inputB != null) _inputB.onValueChanged.AddListener(val => PlayerBScript = val);
 
-        if (_execButtonA != null) _execButtonA.onClick.AddListener(() => { if (!_isExecuting) _runOnce = true; });
-        if (_execButtonB != null) _execButtonB.onClick.AddListener(() => { if (!_isExecuting) _runOnce = true; });
+        // Detectar fin de edición para quitar selección si el jugador acaba la edición manualmente
+        if (_inputA != null) _inputA.onEndEdit.AddListener(_ => { if (_isEditing && _currentTurn == Turn.PlayerA) EndEditing(); });
+        if (_inputB != null) _inputB.onEndEdit.AddListener(_ => { if (_isEditing && _currentTurn == Turn.PlayerB) EndEditing(); });
+
+        // Ejecutar solo si es el turno del jugador correspondiente
+        if (_execButtonA != null) _execButtonA.onClick.AddListener(() => { if (!_isExecuting && _currentTurn == Turn.PlayerA) { _runOnce = false; StartCoroutine(ExecuteCurrentPlayer()); } });
+        if (_execButtonB != null) _execButtonB.onClick.AddListener(() => { if (!_isExecuting && _currentTurn == Turn.PlayerB) { _runOnce = false; StartCoroutine(ExecuteCurrentPlayer()); } });
 
         if (_contButtonA != null) _contButtonA.onClick.AddListener(() => ToggleContinuous());
         if (_contButtonB != null) _contButtonB.onClick.AddListener(() => ToggleContinuous());
 
         UpdateContinuousButtons();
+
+        // Inicializar turnos: Player A comienza por defecto
+        SetTurn(Turn.PlayerA);
     }
 
     private void ToggleContinuous()
@@ -119,8 +139,16 @@ public class TurnBasedManager : MonoBehaviour
     private void UpdateContinuousButtons()
     {
         string label = _continuous ? "Stop Continuous" : "Continuous";
-        if (_contButtonA != null) _contButtonA.GetComponentInChildren<Text>().text = label;
-        if (_contButtonB != null) _contButtonB.GetComponentInChildren<Text>().text = label;
+        if (_contButtonA != null)
+        {
+            var t = _contButtonA.GetComponentInChildren<UI.Text>();
+            if (t != null) t.text = label;
+        }
+        if (_contButtonB != null)
+        {
+            var t = _contButtonB.GetComponentInChildren<UI.Text>();
+            if (t != null) t.text = label;
+        }
     }
 
     private void EnsureEventSystemExists()
@@ -167,7 +195,7 @@ public class TurnBasedManager : MonoBehaviour
     }
 
     // Sustituye la función CreateCanvasForCamera por esta (mantén el resto del archivo)
-    private Canvas CreateCanvasForCamera(Camera cam, string title, out InputField inputField, out Button execButton, out Button continuousButton)
+    private Canvas CreateCanvasForCamera(Camera cam, string title, out UI.InputField inputField, out UI.Button execButton, out UI.Button continuousButton)
     {
         inputField = null;
         execButton = null;
@@ -190,20 +218,20 @@ public class TurnBasedManager : MonoBehaviour
         canvas.sortingOrder = title.Contains("Player B") ? 101 : 100;
         canvas.pixelPerfect = false;
 
-        var cs = canvasGO.AddComponent<CanvasScaler>();
-        cs.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        var cs = canvasGO.AddComponent<UI.CanvasScaler>();
+        cs.uiScaleMode = UI.CanvasScaler.ScaleMode.ScaleWithScreenSize;
         cs.referenceResolution = new Vector2(1280, 720);
-        cs.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+        cs.screenMatchMode = UI.CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
         cs.matchWidthOrHeight = 0.5f;
 
-        canvasGO.AddComponent<GraphicRaycaster>();
+        canvasGO.AddComponent<UI.GraphicRaycaster>();
 
         Debug.Log($"Created camera-bound canvas '{canvasGO.name}' for camera '{cam.name}' (rect={cam.pixelRect}).");
 
         // Panel (background) - pequeño y anclado a la esquina superior izquierda del canvas
         GameObject panelGO = new GameObject("Panel");
         panelGO.transform.SetParent(canvasGO.transform, false);
-        var panelImage = panelGO.AddComponent<Image>();
+        var panelImage = panelGO.AddComponent<UI.Image>();
         panelImage.color = new Color(0f, 0f, 0f, 0.55f);
         RectTransform panelRt = panelGO.GetComponent<RectTransform>();
         // Anclar exactamente en la esquina superior izquierda del canvas (viewport de la cámara)
@@ -217,7 +245,7 @@ public class TurnBasedManager : MonoBehaviour
         // Title text
         GameObject titleGO = new GameObject("Title");
         titleGO.transform.SetParent(panelGO.transform, false);
-        var titleText = titleGO.AddComponent<Text>();
+        var titleText = titleGO.AddComponent<UI.Text>();
         titleText.text = title;
         titleText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         titleText.alignment = TextAnchor.MiddleLeft;
@@ -233,7 +261,7 @@ public class TurnBasedManager : MonoBehaviour
         // InputField background (dentro del panel)
         GameObject inputBG = new GameObject("InputBG");
         inputBG.transform.SetParent(panelGO.transform, false);
-        var inputImage = inputBG.AddComponent<Image>();
+        var inputImage = inputBG.AddComponent<UI.Image>();
         inputImage.color = Color.white;
         RectTransform inputBgRt = inputBG.GetComponent<RectTransform>();
         inputBgRt.anchorMin = new Vector2(0f, 0f);
@@ -245,9 +273,9 @@ public class TurnBasedManager : MonoBehaviour
         // InputField
         GameObject inputGO = new GameObject("InputField");
         inputGO.transform.SetParent(inputBG.transform, false);
-        var inputImg = inputGO.AddComponent<Image>();
+        var inputImg = inputGO.AddComponent<UI.Image>();
         inputImg.color = Color.white;
-        var input = inputGO.AddComponent<InputField>();
+        var input = inputGO.AddComponent<UI.InputField>();
         input.textComponent = CreateText("InputText", inputGO.transform, "", 12, TextAnchor.UpperLeft);
         input.placeholder = CreateText("Placeholder", inputGO.transform, "Escribe instrucciones; separa por ;", 12, TextAnchor.UpperLeft, Color.gray);
         RectTransform inputRt = inputGO.GetComponent<RectTransform>();
@@ -269,11 +297,13 @@ public class TurnBasedManager : MonoBehaviour
 
         // Execute button
         execButton = CreateButton("Execute", buttonsGO.transform, new Vector2(0.5f, 0.5f), new Vector2(90, 28));
-        execButton.GetComponentInChildren<Text>().text = "Execute";
+        var execTxt = execButton.GetComponentInChildren<UI.Text>();
+        if (execTxt != null) execTxt.text = "Execute";
 
         // Continuous toggle button
         continuousButton = CreateButton("Continuous", buttonsGO.transform, new Vector2(0.5f, 0.5f), new Vector2(110, 28));
-        continuousButton.GetComponentInChildren<Text>().text = _continuous ? "Stop" : "Cont.";
+        var contTxt = continuousButton.GetComponentInChildren<UI.Text>();
+        if (contTxt != null) contTxt.text = _continuous ? "Stop" : "Cont.";
 
         // Position buttons inside container
         RectTransform execRt = execButton.GetComponent<RectTransform>();
@@ -286,11 +316,11 @@ public class TurnBasedManager : MonoBehaviour
         return canvas;
     }
 
-    private Text CreateText(string name, Transform parent, string text, int fontSize, TextAnchor anchor, Color? color = null)
+    private UI.Text CreateText(string name, Transform parent, string text, int fontSize, TextAnchor anchor, UnityEngine.Color? color = null)
     {
         GameObject go = new GameObject(name);
         go.transform.SetParent(parent, false);
-        Text t = go.AddComponent<Text>();
+        UI.Text t = go.AddComponent<UI.Text>();
         t.text = text;
         t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         t.fontSize = fontSize;
@@ -303,13 +333,13 @@ public class TurnBasedManager : MonoBehaviour
         return t;
     }
 
-    private Button CreateButton(string name, Transform parent, Vector2 anchor, Vector2 size)
+    private UI.Button CreateButton(string name, Transform parent, Vector2 anchor, Vector2 size)
     {
         GameObject go = new GameObject(name);
         go.transform.SetParent(parent, false);
-        var img = go.AddComponent<Image>();
+        var img = go.AddComponent<UI.Image>();
         img.color = new Color(0.2f, 0.2f, 0.2f, 1f);
-        var btn = go.AddComponent<Button>();
+        var btn = go.AddComponent<UI.Button>();
         var txt = CreateText("Text", go.transform, name, 14, TextAnchor.MiddleCenter, Color.white);
         RectTransform rt = go.GetComponent<RectTransform>();
         rt.sizeDelta = size;
@@ -320,30 +350,187 @@ public class TurnBasedManager : MonoBehaviour
     {
         if (_gameOver) return;
 
+        // Detect selection start to begin editing and enforce mutex between players
+        if (EventSystem.current != null)
+        {
+            var selected = EventSystem.current.currentSelectedGameObject;
+            if (selected == (_inputA != null ? _inputA.gameObject : null))
+            {
+                if (_currentTurn == Turn.PlayerA)
+                {
+                    if (!_isEditing) BeginEditing(Turn.PlayerA);
+                }
+                else
+                {
+                    // Deseleccionar si no es su turno
+                    EventSystem.current.SetSelectedGameObject(null);
+                }
+            }
+            else if (selected == (_inputB != null ? _inputB.gameObject : null))
+            {
+                if (_currentTurn == Turn.PlayerB)
+                {
+                    if (!_isEditing) BeginEditing(Turn.PlayerB);
+                }
+                else
+                {
+                    EventSystem.current.SetSelectedGameObject(null);
+                }
+            }
+        }
+
         if (_continuous && !_isExecuting)
-            StartCoroutine(ExecuteTurn());
+        {
+            // Ejecutar turno del jugador activo en modo continuo
+            StartCoroutine(ExecuteCurrentPlayer());
+        }
         else if (_runOnce && !_isExecuting)
         {
             _runOnce = false;
-            StartCoroutine(ExecuteTurn());
+            StartCoroutine(ExecuteCurrentPlayer());
         }
     }
 
-    private IEnumerator ExecuteTurn()
+    private IEnumerator ExecuteCurrentPlayer()
     {
         if (_gameOver) yield break;
+        if (_isExecuting) yield break;
 
         _isExecuting = true;
 
-        var movesA = MovementParser.Parse(PlayerAScript, _playerA);
-        if (_playerA != null) yield return StartCoroutine(_playerA.ExecuteMoves(movesA, StepDelay));
-        if (_gameOver) { _isExecuting = false; yield break; }
+        // Cancelar timer de turno mientras ejecutamos
+        if (_turnTimerCoroutine != null)
+        {
+            StopCoroutine(_turnTimerCoroutine);
+            _turnTimerCoroutine = null;
+        }
+        _isEditing = false;
 
-        var movesB = MovementParser.Parse(PlayerBScript, _playerB);
-        if (_playerB != null) yield return StartCoroutine(_playerB.ExecuteMoves(movesB, StepDelay));
-        if (_gameOver) { _isExecuting = false; yield break; }
+        if (_currentTurn == Turn.PlayerA)
+        {
+            var movesA = MovementParser.Parse(PlayerAScript, _playerA);
+            if (_playerA != null) yield return StartCoroutine(_playerA.ExecuteMoves(movesA, StepDelay));
+            if (_gameOver) { _isExecuting = false; SetTurn(_currentTurn); yield break; }
+        }
+        else // PlayerB
+        {
+            var movesB = MovementParser.Parse(PlayerBScript, _playerB);
+            if (_playerB != null) yield return StartCoroutine(_playerB.ExecuteMoves(movesB, StepDelay));
+            if (_gameOver) { _isExecuting = false; SetTurn(_currentTurn); yield break; }
+        }
 
+        // Tras ejecutar, cambiar turno al otro jugador (si no hay game over)
+        if (!_gameOver)
+        {
+            SwitchTurn();
+        }
+
+        // Si está en modo continuo, esperar un pequeño delay para evitar cambios instantáneos
+        if (_continuous)
+            yield return new WaitForSeconds(ContinuousTurnDelay);
+
+        // Liberar ejecución y refrescar UI (para que el botón Execute del nuevo jugador quede activo)
         _isExecuting = false;
+        SetTurn(_currentTurn);
+    }
+
+    private void SwitchTurn()
+    {
+        var next = (_currentTurn == Turn.PlayerA) ? Turn.PlayerB : Turn.PlayerA;
+        SetTurn(next);
+    }
+
+    private void SetTurn(Turn t)
+    {
+        _currentTurn = t;
+
+        // Asegurar que la UI refleja el turno: solo el jugador activo puede editar/ejecutar/controles
+        if (_inputA != null) _inputA.interactable = (t == Turn.PlayerA);
+        if (_inputB != null) _inputB.interactable = (t == Turn.PlayerB);
+
+        if (_execButtonA != null) _execButtonA.interactable = (t == Turn.PlayerA) && !_isExecuting;
+        if (_execButtonB != null) _execButtonB.interactable = (t == Turn.PlayerB) && !_isExecuting;
+
+        if (_contButtonA != null) _contButtonA.interactable = (t == Turn.PlayerA);
+        if (_contButtonB != null) _contButtonB.interactable = (t == Turn.PlayerB);
+
+        // Cancelar edición previa si existiera
+        if (_isEditing)
+        {
+            EndEditing();
+        }
+
+        // Deseleccionar cualquier campo UI al cambiar turno
+        if (EventSystem.current != null)
+            EventSystem.current.SetSelectedGameObject(null);
+
+        // Reiniciar timer de turno (solo si no estamos en plena ejecución)
+        if (_turnTimerCoroutine != null)
+        {
+            StopCoroutine(_turnTimerCoroutine);
+            _turnTimerCoroutine = null;
+        }
+
+        if (!_isExecuting && !_gameOver)
+        {
+            _turnTimerCoroutine = StartCoroutine(TurnTimeoutCoroutine(t));
+        }
+
+        Debug.Log($"Turn changed to: {t}");
+    }
+
+    private void BeginEditing(Turn t)
+    {
+        _isEditing = true;
+
+        // Asegurar que la UI del contrario está bloqueada
+        if (t == Turn.PlayerA)
+        {
+            if (_inputB != null) _inputB.interactable = false;
+            if (_execButtonB != null) _execButtonB.interactable = false;
+            if (_contButtonB != null) _contButtonB.interactable = false;
+        }
+        else
+        {
+            if (_inputA != null) _inputA.interactable = false;
+            if (_execButtonA != null) _execButtonA.interactable = false;
+            if (_contButtonA != null) _contButtonA.interactable = false;
+        }
+
+        Debug.Log($"Begin editing for {t}. Timer active ({EditTimeLimit}s).");
+    }
+
+    private void EndEditing()
+    {
+        _isEditing = false;
+
+        // No cancelamos el temporizador de turno aquí: el turno sigue corriendo aunque el jugador deje el InputField.
+        if (EventSystem.current != null)
+            EventSystem.current.SetSelectedGameObject(null);
+
+        Debug.Log("End editing (manual).");
+    }
+
+    private IEnumerator TurnTimeoutCoroutine(Turn t)
+    {
+        float remaining = EditTimeLimit;
+        while (remaining > 0f)
+        {
+            yield return null;
+            remaining -= Time.unscaledDeltaTime;
+            // Posible lugar para exponer remaining a UI si se desea.
+        }
+
+        // Tiempo expirado: forzar fin de edición y cambiar turno
+        Debug.Log($"Turn time expired for {t} after {EditTimeLimit} seconds. Switching turn.");
+        _turnTimerCoroutine = null;
+        _isEditing = false;
+
+        if (EventSystem.current != null)
+            EventSystem.current.SetSelectedGameObject(null);
+
+        // Cambiar turno automático
+        SwitchTurn();
     }
 
     // Llamar cuando un jugador queda sin vida
@@ -361,11 +548,13 @@ public class TurnBasedManager : MonoBehaviour
         if (gameOverManager != null) gameOverManager.MostrarResultado(mensaje);
         else Debug.Log(mensaje);
 
-        // Detener ejecución
+        // Detener ejecución y edición
         _continuous = false;
         _runOnce = false;
+        if (_turnTimerCoroutine != null) { StopCoroutine(_turnTimerCoroutine); _turnTimerCoroutine = null; }
         StopAllCoroutines();
         _isExecuting = false;
+        _isEditing = false;
     }
 
     // Llamar cuando un jugador sale del laberinto (exit trigger)
@@ -386,7 +575,9 @@ public class TurnBasedManager : MonoBehaviour
 
         _continuous = false;
         _runOnce = false;
+        if (_turnTimerCoroutine != null) { StopCoroutine(_turnTimerCoroutine); _turnTimerCoroutine = null; }
         StopAllCoroutines();
         _isExecuting = false;
+        _isEditing = false;
     }
-}       
+}

@@ -206,8 +206,8 @@ public class Character : MonoBehaviour
     {
         if (_grid == null) return;
 
-        if (dir == Vector2Int.up) SetFacing(Facing.North, false);
-        else if (dir == Vector2Int.down) SetFacing(Facing.South, false);
+        if (dir == Vector2Int.up) SetFacing(Facing.North, true);
+        else if (dir == Vector2Int.down) SetFacing(Facing.South, true);
         else if (dir == Vector2Int.right) SetFacing(Facing.East, true);
         else if (dir == Vector2Int.left) SetFacing(Facing.West, true);
 
