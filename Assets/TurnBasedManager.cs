@@ -53,6 +53,18 @@ public class TurnBasedManager : MonoBehaviour
     private bool _isEditing = false;
     private Coroutine _turnTimerCoroutine;
 
+    // Historial por jugador: posición y facing al final del último turno (lastEnd)
+    // y al final del turno anterior (prevEnd). Radar debe devolver prevEnd del oponente.
+    private Vector2Int _lastEndA_pos = Vector2Int.zero;
+    private Character.Facing _lastEndA_facing = Character.Facing.North;
+    private Vector2Int _prevEndA_pos = Vector2Int.zero;
+    private Character.Facing _prevEndA_facing = Character.Facing.North;
+
+    private Vector2Int _lastEndB_pos = Vector2Int.zero;
+    private Character.Facing _lastEndB_facing = Character.Facing.North;
+    private Vector2Int _prevEndB_pos = Vector2Int.zero;
+    private Character.Facing _prevEndB_facing = Character.Facing.North;
+
     // Sobrecarga para compatibilidad: Initialize con sólo los dos personajes.
     public void Initialize(Character a, Character b)
     {
@@ -91,7 +103,23 @@ public class TurnBasedManager : MonoBehaviour
             _playerB.gameObject.AddComponent<PlayerHealth>();
 
         _playerA.manager = this;
-        _playerB.manager = this;
+        _playerB.manager = this;    
+
+        // Inicializar historial de turnos con las posiciones iniciales (ambos slots iguales al inicio)
+        if (_playerA != null && _playerB != null)
+        {
+            // Para A (historial de A)
+            _lastEndA_pos = _playerA.CellPosition;
+            _lastEndA_facing = _playerA.CurrentFacing;
+            _prevEndA_pos = _lastEndA_pos;
+            _prevEndA_facing = _lastEndA_facing;
+
+            // Para B (historial de B)
+            _lastEndB_pos = _playerB.CellPosition;
+            _lastEndB_facing = _playerB.CurrentFacing;
+            _prevEndB_pos = _lastEndB_pos;
+            _prevEndB_facing = _lastEndB_facing;
+        }
 
         // LOG: confirmar llamada y cámaras recibidas
         Debug.Log($"TurnBasedManager.Initialize called. camA={(camA != null ? camA.name : "null")}, camB={(camB != null ? camB.name : "null")}");
@@ -151,9 +179,11 @@ public class TurnBasedManager : MonoBehaviour
         }
     }
 
+    // EnsureEventSystemExists (reemplaza la versión anterior)
     private void EnsureEventSystemExists()
     {
-        if (FindObjectOfType<EventSystem>() != null)
+        var existing = UnityEngine.Object.FindFirstObjectByType<EventSystem>();
+        if (existing != null)
         {
             Debug.Log("EventSystem already exists.");
             return;
@@ -406,7 +436,10 @@ public class TurnBasedManager : MonoBehaviour
         }
         _isEditing = false;
 
-        if (_currentTurn == Turn.PlayerA)
+        // Guardar el turno actual para usar después al actualizar historial
+        var executingTurn = _currentTurn;
+
+        if (executingTurn == Turn.PlayerA)
         {
             var movesA = MovementParser.Parse(PlayerAScript, _playerA);
             if (_playerA != null) yield return StartCoroutine(_playerA.ExecuteMoves(movesA, StepDelay));
@@ -417,6 +450,28 @@ public class TurnBasedManager : MonoBehaviour
             var movesB = MovementParser.Parse(PlayerBScript, _playerB);
             if (_playerB != null) yield return StartCoroutine(_playerB.ExecuteMoves(movesB, StepDelay));
             if (_gameOver) { _isExecuting = false; SetTurn(_currentTurn); yield break; }
+        }
+
+        // Actualizar historial de fin de turno del jugador que acaba de ejecutar:
+        if (executingTurn == Turn.PlayerA && _playerA != null)
+        {
+            _prevEndA_pos = _lastEndA_pos;
+            _prevEndA_facing = _lastEndA_facing;
+            _lastEndA_pos = _playerA.CellPosition;
+            _lastEndA_facing = _playerA.CurrentFacing;
+            Debug.Log($"[Radar] Turn end A: prevEndA={_prevEndA_pos}/{_prevEndA_facing} lastEndA={_lastEndA_pos}/{_lastEndA_facing}");
+            // Limpiar powerups activos al final del turno
+            _playerA.ClearActivePowerups();
+        }
+        else if (executingTurn == Turn.PlayerB && _playerB != null)
+        {
+            _prevEndB_pos = _lastEndB_pos;
+            _prevEndB_facing = _lastEndB_facing;
+            _lastEndB_pos = _playerB.CellPosition;
+            _lastEndB_facing = _playerB.CurrentFacing;
+            Debug.Log($"[Radar] Turn end B: prevEndB={_prevEndB_pos}/{_prevEndB_facing} lastEndB={_lastEndB_pos}/{_lastEndB_facing}");
+            // Limpiar powerups activos al final del turno
+            _playerB.ClearActivePowerups();
         }
 
         // Tras ejecutar, cambiar turno al otro jugador (si no hay game over)
@@ -443,6 +498,10 @@ public class TurnBasedManager : MonoBehaviour
     private void SetTurn(Turn t)
     {
         _currentTurn = t;
+
+        // Cuando comienza el turno de un jugador, promovemos cualquier powerup queued -> active
+        if (t == Turn.PlayerA && _playerA != null) _playerA.PromoteQueuedPowerups();
+        if (t == Turn.PlayerB && _playerB != null) _playerB.PromoteQueuedPowerups();
 
         // Asegurar que la UI refleja el turno: solo el jugador activo puede editar/ejecutar/controles
         if (_inputA != null) _inputA.interactable = (t == Turn.PlayerA);
@@ -544,7 +603,7 @@ public class TurnBasedManager : MonoBehaviour
         string loserName = loser != null ? loser.name : "Desconocido";
         string mensaje = $"Ganador: {winnerName}\nPerdedor: {loserName}";
 
-        if (gameOverManager == null) gameOverManager = FindObjectOfType<GameOverManager>();
+        if (gameOverManager == null) gameOverManager = UnityEngine.Object.FindFirstObjectByType<GameOverManager>();
         if (gameOverManager != null) gameOverManager.MostrarResultado(mensaje);
         else Debug.Log(mensaje);
 
@@ -569,7 +628,7 @@ public class TurnBasedManager : MonoBehaviour
         string loserName = loser != null ? loser.name : "Desconocido";
         string mensaje = $"Jugador salió del laberinto.\nGanador: {winnerName}\nPerdedor: {loserName}";
 
-        if (gameOverManager == null) gameOverManager = FindObjectOfType<GameOverManager>();
+        if (gameOverManager == null) gameOverManager = UnityEngine.Object.FindFirstObjectByType<GameOverManager>();
         if (gameOverManager != null) gameOverManager.MostrarResultado(mensaje);
         else Debug.Log(mensaje);
 
@@ -579,5 +638,111 @@ public class TurnBasedManager : MonoBehaviour
         StopAllCoroutines();
         _isExecuting = false;
         _isEditing = false;
+    }
+
+    // Devuelve la última posición y facing conocida por 'requester' sobre su oponente.
+    // IMPORTANTE: retorna la posición/facing que el oponente tenía al final de SU turno anterior (prevEnd).
+    // Si el requester tiene activeTrueRadar, devolvemos la posición actual del enemigo y consumimos el powerup.
+    public (Vector2Int pos, Character.Facing facing) GetLastKnownRadarFor(Character requester)
+    {
+        if (requester == _playerA)
+               {
+            // Si A tiene TrueRadar activo, devolver posición actual de B y consumirlo
+            if (_playerA != null && _playerA.activeTrueRadar && _playerB != null)
+            {
+                _playerA.activeTrueRadar = false; // consumo de un solo uso
+                Debug.Log($"[Radar] TrueRadar usado por A -> devolviendo posición actual de B: {_playerB.CellPosition}/{_playerB.CurrentFacing} (powerup consumido)");
+                return (_playerB.CellPosition, _playerB.CurrentFacing);
+            }
+
+            // A solicita lo que conoce de B => devolver prevEnd de B
+            Debug.Log($"[Radar] GetLastKnownRadarFor: requester=A -> returning prevEndB={_prevEndB_pos}/{_prevEndB_facing}");
+            return (_prevEndB_pos, _prevEndB_facing);
+        }
+        if (requester == _playerB)
+        {
+            // Si B tiene TrueRadar activo, devolver posición actual de A y consumirlo
+            if (_playerB != null && _playerB.activeTrueRadar && _playerA != null)
+            {
+                _playerB.activeTrueRadar = false; // consumo de un solo uso
+                Debug.Log($"[Radar] TrueRadar usado por B -> devolviendo posición actual de A: {_playerA.CellPosition}/{_playerA.CurrentFacing} (powerup consumido)");
+                return (_playerA.CellPosition, _playerA.CurrentFacing);
+            }
+
+            // B solicita lo que conoce de A => devolver prevEnd de A
+            Debug.Log($"[Radar] GetLastKnownRadarFor: requester=B -> returning prevEndA={_prevEndA_pos}/{_prevEndA_facing}");
+            return (_prevEndA_pos, _prevEndA_facing);
+        }
+        // por defecto (sin requester conocido), devolver (0,North)
+        Debug.LogWarning("[Radar] GetLastKnownRadarFor: requester desconocido, devolviendo (0, North)");
+        return (Vector2Int.zero, Character.Facing.North);
+    }
+
+    // Compatibilidad: ReportPositionMoved (método público de apoyo, no altera la lógica de historial por turnos)
+    public void ReportPositionMoved(Character moved, Vector2Int previousPosition, Character.Facing previousFacing)
+    {
+        // Este método existe por compatibilidad con versiones previas del código que llamaban a manager.ReportPositionMoved(...)
+        // La lógica real del radar por turnos se gestiona con prevEnd/lastEnd en ExecuteCurrentPlayer -> actualización al final del turno.
+        // Aquí dejamos un log informativo y no alteramos el historial por turnos.
+        if (moved == null)
+        {
+            Debug.LogWarning("[Radar] ReportPositionMoved llamado con 'moved' nulo.");
+            return;
+        }
+
+        Debug.Log($"[Radar] ReportPositionMoved (compat): moved={moved.name}, previous={previousPosition}, previousFacing={previousFacing} -- no se modifica historial por turnos.");
+    }
+
+    // ----------------------------------------------------
+    // UI: mostrar notificación temporal cuando un jugador recoge un powerup
+    // ----------------------------------------------------
+    public void ShowPowerupCollected(Character collector, Powerup.PowerupType type)
+    {
+        if (collector == null) return;
+
+        string message;
+        if (type == Powerup.PowerupType.Phase) message = "Has recogido: Atravesar muro";
+        else message = "Has recogido: Radar verdadero";
+
+        // Seleccionar canvas del jugador que recogió
+        Canvas targetCanvas = null;
+        if (collector == _playerA) targetCanvas = _canvasA;
+        else if (collector == _playerB) targetCanvas = _canvasB;
+
+        if (targetCanvas == null)
+        {
+            Debug.Log($"[Powerup] {collector.name} recogió {type}. Mensaje: {message}");
+            return;
+        }
+
+        // Intentar parentear el mensaje debajo del panel si existe
+        Transform panel = targetCanvas.transform.Find("Panel");
+        Transform parent = panel != null ? panel : targetCanvas.transform;
+
+        var go = new GameObject("PowerupMessage");
+        go.transform.SetParent(parent, false);
+        var txt = go.AddComponent<UI.Text>();
+        txt.text = message;
+        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        txt.fontSize = 16;
+        txt.color = Color.yellow;
+        txt.alignment = TextAnchor.UpperLeft;
+
+        var rt = txt.GetComponent<RectTransform>();
+        // Colocar el mensaje justo debajo del título (si existe), offset -30
+        rt.anchorMin = new Vector2(0f, 1f);
+        rt.anchorMax = new Vector2(1f, 1f);
+        rt.pivot = new Vector2(0.5f, 1f);
+        rt.sizeDelta = new Vector2(0f, 24f);
+        rt.anchoredPosition = new Vector2(0f, -30f);
+
+        // Destruir el mensaje después de 4 segundos
+        StartCoroutine(DestroyAfterSeconds(go, 4f));
+    }
+
+    private IEnumerator DestroyAfterSeconds(GameObject go, float seconds)
+    {
+        yield return new WaitForSeconds(seconds);
+        if (go != null) Destroy(go);
     }
 }

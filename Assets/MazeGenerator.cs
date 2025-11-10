@@ -16,6 +16,10 @@ public class MazeGenerator : MonoBehaviour
     [SerializeField] private GameObject _player1ModelPrefab;
     [SerializeField] private GameObject _player2ModelPrefab;
 
+    // Prefabs opcionales de powerups (si no se asignan, se generará un visual simple)
+    [SerializeField] private GameObject _powerupPhasePrefab;
+    [SerializeField] private GameObject _powerupTrueRadarPrefab;
+
     private MazeCell[,] _mazeGrid;
 
     // Entrada exterior (esquinas) y spawn según petición
@@ -57,6 +61,9 @@ public class MazeGenerator : MonoBehaviour
 
         // Spawns exactos en esquinas y una única salida en la pared contraria
         DefineEntranceAndExit();
+
+        // Spawn de powerups: generamos countEach basado en el "largo" / 4 (ver explicación)
+        SpawnPowerups();
 
         SetupCharacters();
     }
@@ -336,5 +343,99 @@ public class MazeGenerator : MonoBehaviour
         charB.manager = manager;
 
         Debug.Log($"Personajes configurados: {charA.name} en {posA} , {charB.name} en {posB}");
+    }
+
+    private void SpawnPowerups()
+    {
+        // Ahora se calcula countEach usando el "largo" dividido por 4.
+        // Interpretación: usamos _mazeWidth / 4. Ejemplo: width=8 -> 8/4 = 2.
+        int countEach = _mazeWidth / 4; // puede ser 0 si el laberinto es pequeño
+
+        var forbidden = new HashSet<Vector2Int>();
+        forbidden.Add(_spawnPosA);
+        forbidden.Add(_spawnPosB);
+        forbidden.Add(_exitPos);
+
+        // Recopilar todas las celdas válidas
+        var candidates = new List<Vector2Int>();
+        for (int x = 0; x < _mazeWidth; x++)
+        {
+            for (int z = 0; z < _mazeDepth; z++)
+            {
+                var pos = new Vector2Int(x, z);
+                if (forbidden.Contains(pos)) continue;
+                candidates.Add(pos);
+            }
+        }
+
+        // Mezclar
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            int j = Random.Range(i, candidates.Count);
+            var tmp = candidates[i];
+            candidates[i] = candidates[j];
+            candidates[j] = tmp;
+        }
+
+        int idx = 0;
+        // Spawn Phase powerups
+        for (int k = 0; k < countEach && idx < candidates.Count; k++, idx++)
+        {
+            var pos = candidates[idx];
+            SpawnPowerupAt(pos, Powerup.PowerupType.Phase);
+        }
+        // Spawn TrueRadar powerups
+        for (int k = 0; k < countEach && idx < candidates.Count; k++, idx++)
+        {
+            var pos = candidates[idx];
+            SpawnPowerupAt(pos, Powerup.PowerupType.TrueRadar);
+        }
+
+        Debug.Log($"Spawned {countEach} Phase and {countEach} TrueRadar powerups (mazeWidth={_mazeWidth}, mazeDepth={_mazeDepth}).");
+    }
+
+    private void SpawnPowerupAt(Vector2Int cellPos, Powerup.PowerupType type)
+    {
+        var cell = _mazeGrid[cellPos.x, cellPos.y];
+        if (cell == null) return;
+
+        GameObject prefab = null;
+        if (type == Powerup.PowerupType.Phase) prefab = _powerupPhasePrefab;
+        else prefab = _powerupTrueRadarPrefab;
+
+        GameObject go;
+        float spawnY = 0.5f; // alinear con la altura del Character (fixedHeight)
+        if (prefab != null)
+        {
+            go = Instantiate(prefab, new Vector3(cellPos.x, spawnY, cellPos.y), Quaternion.identity);
+        }
+        else
+        {
+            // Crear visual simple en runtime (centro en spawnY)
+            go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.transform.position = new Vector3(cellPos.x, spawnY, cellPos.y);
+            go.transform.localScale = new Vector3(0.6f, 0.2f, 0.6f);
+        }
+
+        // Añadir componente Powerup si no existe y configurar
+        var p = go.GetComponent<Powerup>();
+        if (p == null) p = go.AddComponent<Powerup>();
+        p.Type = (type == Powerup.PowerupType.Phase) ? Powerup.PowerupType.Phase : Powerup.PowerupType.TrueRadar;
+
+        // Ajustar visual/color si no hay prefab
+        var mr = go.GetComponent<MeshRenderer>();
+        if (mr != null)
+        {
+            if (type == Powerup.PowerupType.Phase) mr.material.color = Color.cyan;
+            else mr.material.color = Color.magenta;
+        }
+
+        // Parentear bajo la celda para organización
+        go.transform.SetParent(cell.transform, true);
+
+        // Asegurar collider isTrigger
+        var col = go.GetComponent<Collider>();
+        if (col == null) { var bc = go.AddComponent<BoxCollider>(); bc.isTrigger = true; }
+        else col.isTrigger = true;
     }
 }

@@ -767,13 +767,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MazeGenerator
   _mazeCellPrefab: {fileID: 1507542849475825641, guid: f5c5b18a6e68e8d448b90718cfe8d2db, type: 3}
-  _mazeWidth: 10
-  _mazeDepth: 10
+  _mazeWidth: 6
+  _mazeDepth: 6
   _characterPrefab: {fileID: 6820347826810506660, guid: bed3b58a161ac624da2ba31d9edd9785, type: 3}
   _cameraP1Controller: {fileID: 1024114505}
   _cameraP2Controller: {fileID: 1613087753}
   _player1ModelPrefab: {fileID: 919132149155446097, guid: b08733880f80f6344b546d10dde1f6b3, type: 3}
   _player2ModelPrefab: {fileID: 919132149155446097, guid: 4ffedcd333be25b4c9ea934a66677854, type: 3}
+  _powerupPhasePrefab: {fileID: 0}
+  _powerupTrueRadarPrefab: {fileID: 0}
 --- !u!4 &1313284491
 Transform:
   m_ObjectHideFlags: 0

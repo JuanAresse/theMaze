@@ -34,6 +34,15 @@ public class Character : MonoBehaviour
     // Nueva referencia pública para que MazeGenerator le asigne la cámara correspondiente
     public CamaraTerceraPersona cameraController;
 
+    // Exponer la posición de celda públicamente para uso del manager (radar)
+    public Vector2Int CellPosition => _pos;
+
+    // --- POWERUPS: queued = recogido este turno, active = disponible durante el siguiente turno ---
+    public bool queuedPhase = false;
+    public bool queuedTrueRadar = false;
+    public bool activePhase = false;
+    public bool activeTrueRadar = false;
+
     public void Init(MazeCell[,] grid, Vector2Int startPos, string playerName)
     {
         _grid = grid;
@@ -89,7 +98,24 @@ public class Character : MonoBehaviour
         foreach (var action in moves)
         {
             if (_logicLocked) yield break;
-            action.Invoke();    
+
+            // Capturar estado previo
+            Vector2Int previous = _pos;
+            Facing previousFacing = CurrentFacing;
+
+            Debug.Log($"[ExecuteMoves] {name} - antes: pos={previous}, facing={previousFacing}, próxima acción={action.Method.Name}");
+
+            action.Invoke();
+
+            Debug.Log($"[ExecuteMoves] {name} - después: pos={_pos}, facing={CurrentFacing}");
+
+            // Si hubo cambio de posición u orientación, reportarlo al manager
+            if (manager != null && (previous != _pos || previousFacing != CurrentFacing))
+            {
+                Debug.Log($"[ExecuteMoves] {name} -> reportando cambio anterior pos={previous}, facing={previousFacing} al manager");
+                manager.ReportPositionMoved(this, previous, previousFacing);
+            }
+
             yield return new WaitForSeconds(stepDelay);
         }
     }
@@ -192,8 +218,6 @@ public class Character : MonoBehaviour
         if (_rb != null)
         {
             _rb.position = world;
-            _rb.linearVelocity = Vector3.zero;
-            _rb.angularVelocity = Vector3.zero;
         }
         else
         {
@@ -213,6 +237,74 @@ public class Character : MonoBehaviour
 
         var currentCell = _grid[_pos.x, _pos.y];
 
+        // Si el jugador tiene activePhase y hay un muro inmediato en la dirección,
+        // se moverá a la celda ADYACENTE al otro lado del muro (una celda), no 2.
+        if (activePhase)
+        {
+            if (dir == Vector2Int.right)
+            {
+                if (currentCell.HasRightWall())
+                {
+                    if (_pos.x + 1 < _width)
+                    {
+                        _pos.x += 1; // mover a la celda al otro lado del muro (adjacente)
+                        ApplyPositionImmediately();
+                        // Consumir powerup de un solo uso
+                        activePhase = false;
+                        Debug.Log($"{name} usó Phase: atravesó muro y se colocó en {_pos} (powerup consumido)");
+                        return;
+                    }
+                    else return;
+                }
+            }
+            else if (dir == Vector2Int.left)
+            {
+                if (currentCell.HasLeftWall())
+                {
+                    if (_pos.x - 1 >= 0)
+                    {
+                        _pos.x -= 1;
+                        ApplyPositionImmediately();
+                        activePhase = false;
+                        Debug.Log($"{name} usó Phase: atravesó muro y se colocó en {_pos} (powerup consumido)");
+                        return;
+                    }
+                    else return;
+                }
+            }
+            else if (dir == Vector2Int.up)
+            {
+                if (currentCell.HasFrontWall())
+                {
+                    if (_pos.y + 1 < _depth)
+                    {
+                        _pos.y += 1;
+                        ApplyPositionImmediately();
+                        activePhase = false;
+                        Debug.Log($"{name} usó Phase: atravesó muro y se colocó en {_pos} (powerup consumido)");
+                        return;
+                    }
+                    else return;
+                }
+            }
+            else if (dir == Vector2Int.down)
+            {
+                if (currentCell.HasBackWall())
+                {
+                    if (_pos.y - 1 >= 0)
+                    {
+                        _pos.y -= 1;
+                        ApplyPositionImmediately();
+                        activePhase = false;
+                        Debug.Log($"{name} usó Phase: atravesó muro y se colocó en {_pos} (powerup consumido)");
+                        return;
+                    }
+                    else return;
+                }
+            }
+        }
+
+        // Comportamiento por defecto (sin phase o sin muro inmediato)
         if (dir == Vector2Int.right)
         {
             if (currentCell.HasRightWall()) return;
@@ -246,12 +338,17 @@ public class Character : MonoBehaviour
             _pos.y -= 1;
         }
 
+        ApplyPositionImmediately();
+
+        // Nota: la notificación al manager ahora la hace ExecuteMoves para centralizar el comportamiento.
+    }
+
+    private void ApplyPositionImmediately()
+    {
         Vector3 targetPos = new Vector3(_pos.x, fixedHeight, _pos.y);
         if (_rb != null)
         {
             _rb.position = targetPos;
-            _rb.linearVelocity = Vector3.zero;
-            _rb.angularVelocity = Vector3.zero;
         }
         else
         {
@@ -282,44 +379,33 @@ public class Character : MonoBehaviour
     public void MoveLeft() => Move(Vector2Int.left);
     public void MoveRight() => Move(Vector2Int.right);
 
+    // Shoot sin argumentos ya no está permitido: emitir warning y no hacer nada.
     public void Shoot()
+    {
+        Debug.LogWarning($"{name}: Shoot() sin argumentos ya no está permitido. Usa Shoot(...Radar...)");
+        // No ejecuta comportamiento previo.
+    }
+
+    // Nuevo método: disparar a una celda específica (usado por Shoot(...Radar))
+    public void ShootAt(Vector2Int targetCell)
     {
         if (manager == null) return;
 
-        // Si hay una rejilla válida, comprobar si hay muro justo en frente según la orientación.
-        if (_grid != null && _pos.x >= 0 && _pos.x < _width && _pos.y >= 0 && _pos.y < _depth)
-        {
-            var currentCell = _grid[_pos.x, _pos.y];
-            bool wallInFront = false;
-            switch (CurrentFacing)
-            {
-                case Facing.North:
-                    wallInFront = currentCell.HasFrontWall();
-                    break;
-                case Facing.South:
-                    wallInFront = currentCell.HasBackWall();
-                    break;
-                case Facing.East:
-                    wallInFront = currentCell.HasRightWall();
-                    break;
-                case Facing.West:
-                    wallInFront = currentCell.HasLeftWall();
-                    break;
-            }
+        Character target = (this == manager.PlayerA) ? manager.PlayerB : manager.PlayerA;
+        if (target == null) return;
 
-            if (wallInFront)
+        // Si el enemigo se encuentra exactamente en la celda objetivo, aplicamos daño.
+        if (target.CellPosition == targetCell)
+        {
+            if (target.health != null)
             {
-                Debug.Log($"{name}: intento de disparo bloqueado por un muro en frente.");
-                return;
+                target.health.TakeDamage(20);
+                Debug.Log($"{name} disparó con radar a {target.name} en {targetCell}, vida restante: {target.health.currentHealth}");
             }
         }
-
-        Character target = (this == manager.PlayerA) ? manager.PlayerB : manager.PlayerA;
-
-        if (target != null && target.health != null)
+        else
         {
-            target.health.TakeDamage(20);
-            Debug.Log($"{name} disparó a {target.name}, vida restante: {target.health.currentHealth}");
+            Debug.Log($"{name} disparó a {targetCell} (radar) y falló. Posición real de {target.name}: {target.CellPosition}");
         }
     }
 
@@ -330,8 +416,6 @@ public class Character : MonoBehaviour
         Vector3 targetPos = new Vector3(_pos.x, fixedHeight, _pos.y);
         if (_rb != null)
         {
-            _rb.linearVelocity = Vector3.zero;
-            _rb.angularVelocity = Vector3.zero;
             _rb.position = targetPos;
         }
         else
@@ -352,6 +436,49 @@ public class Character : MonoBehaviour
         if (HasTagSafe(other.gameObject, "Exit") || other.GetComponent<ExitZone>() != null || other.GetComponentInParent<ExitZone>() != null)
         {
             if (manager != null) manager.PlayerExited(this);
+        }
+    }
+
+    // ----------------- POWERUPS API -----------------
+    public void CollectPowerup(Powerup.PowerupType type)
+    {
+        if (type == Powerup.PowerupType.Phase)
+        {
+            queuedPhase = true;
+            Debug.Log($"{name} recogió Powerup Phase (disponible next turn).");
+        }
+        else if (type == Powerup.PowerupType.TrueRadar)
+        {
+            queuedTrueRadar = true;
+            Debug.Log($"{name} recogió Powerup TrueRadar (disponible next turn).");
+        }
+    }
+
+    // Called by manager when the character's turn starts: promote queued -> active
+    public void PromoteQueuedPowerups()
+    {
+        if (queuedPhase)
+        {
+            activePhase = true;
+            queuedPhase = false;
+            Debug.Log($"{name}: Phase activado para este turno.");
+        }
+        if (queuedTrueRadar)
+        {
+            activeTrueRadar = true;
+            queuedTrueRadar = false;
+            Debug.Log($"{name}: TrueRadar activado para este turno.");
+        }
+    }
+
+    // Called at the end of the character's turn to expire active effects
+    public void ClearActivePowerups()
+    {
+        if (activePhase || activeTrueRadar)
+        {
+            activePhase = false;
+            activeTrueRadar = false;
+            Debug.Log($"{name}: powerups activos limpiados al final del turno.");
         }
     }
 }
