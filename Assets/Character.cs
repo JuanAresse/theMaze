@@ -223,6 +223,9 @@ public class Character : MonoBehaviour
         {
             transform.position = world;
         }
+
+        // Comprobación inmediata de si la celda es la salida (evita depender solo de triggers)
+        CheckForExitAtCurrentCell();
     }
 
     // Movement: set facing and when turning left/right, request visual rotation.
@@ -354,6 +357,32 @@ public class Character : MonoBehaviour
         {
             transform.position = targetPos;
         }
+
+        // Comprobación inmediata de si la celda actual contiene la salida
+        CheckForExitAtCurrentCell();
+    }
+
+    // Comprueba si la celda actual contiene un ExitZone y notifica al manager.
+    private void CheckForExitAtCurrentCell()
+    {
+        if (_grid == null) return;
+        if (_pos.x < 0 || _pos.x >= _width || _pos.y < 0 || _pos.y >= _depth) return;
+
+        var cell = _grid[_pos.x, _pos.y];
+        if (cell == null) return;
+
+        var exit = cell.GetComponentInChildren<ExitZone>(true);
+        if (exit != null)
+        {
+            Debug.Log($"[CheckForExit] {name} detected ExitZone at {_pos} -> notifying manager {(manager != null ? manager.name : "null")}");
+            if (manager != null) manager.PlayerExited(this);
+            else
+            {
+                var fallback = UnityEngine.Object.FindObjectOfType<TurnBasedManager>();
+                if (fallback != null) fallback.PlayerExited(this);
+                else Debug.LogWarning("[CheckForExit] No TurnBasedManager found to notify exit.");
+            }
+        }
     }
 
     // Set facing; if rotateVisual flag true, update target rotation for the visual.
@@ -432,10 +461,31 @@ public class Character : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        // Detectamos salida por tag "Exit" (si existe) o por componente ExitZone.
+        // Log diagnóstico
+        Debug.Log($"[OnTriggerEnter] {name} collided with '{(other != null ? other.gameObject.name : "null")}' tag='{(other != null && other.gameObject != null ? other.gameObject.tag : "null")}'");
+
+        // Detectamos salida por tag "Exit" o por componente ExitZone.
         if (HasTagSafe(other.gameObject, "Exit") || other.GetComponent<ExitZone>() != null || other.GetComponentInParent<ExitZone>() != null)
         {
-            if (manager != null) manager.PlayerExited(this);
+            Debug.Log($"[OnTriggerEnter] {name} detected ExitZone -> notifying manager {(manager != null ? manager.name : "null")}");
+            if (manager != null)
+            {
+                manager.PlayerExited(this);
+            }
+            else
+            {
+                // Fallback de diagnóstico: intentar localizar TurnBasedManager en escena y llamarlo
+                var fallback = UnityEngine.Object.FindObjectOfType<TurnBasedManager>();
+                if (fallback != null)
+                {
+                    Debug.Log("[OnTriggerEnter] Fallback TurnBasedManager found - calling PlayerExited.");
+                    fallback.PlayerExited(this);
+                }
+                else
+                {
+                    Debug.LogWarning("[OnTriggerEnter] No TurnBasedManager found to notify exit.");
+                }
+            }
         }
     }
 

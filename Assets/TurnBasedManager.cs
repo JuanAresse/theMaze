@@ -603,7 +603,19 @@ public class TurnBasedManager : MonoBehaviour
         string loserName = loser != null ? loser.name : "Desconocido";
         string mensaje = $"Ganador: {winnerName}\nPerdedor: {loserName}";
 
-        if (gameOverManager == null) gameOverManager = UnityEngine.Object.FindFirstObjectByType<GameOverManager>();
+        // Alineado con PlayerExited: asegurar existencia de GameOverManager (crear si es necesario)
+        if (gameOverManager == null)
+        {
+            try { gameOverManager = UnityEngine.Object.FindFirstObjectByType<GameOverManager>(); } catch { /* fallback */ }
+            if (gameOverManager == null) gameOverManager = UnityEngine.Object.FindObjectOfType<GameOverManager>();
+            if (gameOverManager == null)
+            {
+                gameOverManager = gameObject.GetComponent<GameOverManager>();
+                if (gameOverManager == null) gameOverManager = gameObject.AddComponent<GameOverManager>();
+                Debug.Log("[PlayerLost] Created GameOverManager dynamically for showing result.");
+            }
+        }
+
         if (gameOverManager != null) gameOverManager.MostrarResultado(mensaje);
         else Debug.Log(mensaje);
 
@@ -622,13 +634,26 @@ public class TurnBasedManager : MonoBehaviour
         if (_gameOver) return;
         _gameOver = true;
 
-        Character winner = (exiter == _playerA) ? _playerA : _playerB; // quien sale gana (ajustable)
+        string winnerLabel = (exiter == _playerA) ? "Jugador 1" : "Jugador 2";
+        Character winner = (exiter == _playerA) ? _playerA : _playerB;
         Character loser = (exiter == _playerA) ? _playerB : _playerA;
-        string winnerName = winner != null ? winner.name : "Nadie";
+        string winnerName = winner != null ? winner.name : winnerLabel;
         string loserName = loser != null ? loser.name : "Desconocido";
-        string mensaje = $"Jugador salió del laberinto.\nGanador: {winnerName}\nPerdedor: {loserName}";
+        string mensaje = $"{winnerLabel} ha ganado.\nGanador: {winnerName}\nPerdedor: {loserName}";
 
-        if (gameOverManager == null) gameOverManager = UnityEngine.Object.FindFirstObjectByType<GameOverManager>();
+        // Asegurar existencia de GameOverManager (crear si es necesario)
+        if (gameOverManager == null)
+        {
+            try { gameOverManager = UnityEngine.Object.FindFirstObjectByType<GameOverManager>(); } catch { /* fallback */ }
+            if (gameOverManager == null) gameOverManager = UnityEngine.Object.FindObjectOfType<GameOverManager>();
+            if (gameOverManager == null)
+            {
+                gameOverManager = gameObject.GetComponent<GameOverManager>();
+                if (gameOverManager == null) gameOverManager = gameObject.AddComponent<GameOverManager>();
+                Debug.Log("[PlayerExited] Created GameOverManager dynamically for showing result.");
+            }
+        }
+
         if (gameOverManager != null) gameOverManager.MostrarResultado(mensaje);
         else Debug.Log(mensaje);
 
