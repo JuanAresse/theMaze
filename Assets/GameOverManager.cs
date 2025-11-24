@@ -4,6 +4,11 @@ using UnityEngine.UI;
 using TMPro;
 using UnityEngine.EventSystems;
 
+/*
+GameObject: GameOverManager (attach to a persistent GameObject or created dynamically)
+Descripción: Crea/gestiona la UI de fin de juego, muestra resultado y permite reiniciar o volver al menú.
+*/
+
 public class GameOverManager : MonoBehaviour
 {
     public GameObject gameOverUI;
@@ -14,6 +19,8 @@ public class GameOverManager : MonoBehaviour
 
     private bool gameEnded = false;
 
+    // MostrarResultado: muestra el mensaje de fin de juego y pausa el tiempo.
+    // Parámetros: mensaje - texto que se mostrará en la UI.
     public void MostrarResultado(string mensaje)
     {
         if (gameEnded) return;
@@ -24,15 +31,14 @@ public class GameOverManager : MonoBehaviour
         if (gameOverUI != null) gameOverUI.SetActive(true);
         if (resultadoText != null) resultadoText.text = mensaje;
 
-        // Pausa el juego y muestra cursor para permitir pulsar el botón
         Time.timeScale = 0f;
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
     }
 
+    // EnsureUI: asegura que exista una UI válida (reutiliza o crea elementos necesarios).
     private void EnsureUI()
     {
-        // Si ya hay un gameOverUI en escena, intentar reutilizar sus componentes
         if (gameOverUI != null)
         {
             if (resultadoText == null)
@@ -41,7 +47,6 @@ public class GameOverManager : MonoBehaviour
             if (reiniciarButton == null)
                 reiniciarButton = gameOverUI.GetComponentInChildren<Button>(true);
 
-            // Intentar localizar explícitamente el botón de menú principal si existe
             if (mainMenuButton == null)
             {
                 var allButtons = gameOverUI.GetComponentsInChildren<Button>(true);
@@ -63,7 +68,6 @@ public class GameOverManager : MonoBehaviour
                 mainMenuButton.onClick.AddListener(IrAlMenuPrincipal);
             }
 
-            // Si falta alguno de los elementos, crearlos bajo un panel dentro del gameOverUI
             if (resultadoText != null && reiniciarButton != null && mainMenuButton != null) return;
 
             Transform panel = gameOverUI.transform.Find("Panel");
@@ -98,7 +102,6 @@ public class GameOverManager : MonoBehaviour
                 resultadoText = tmp;
             }
 
-            // Crear botón Menu Principal si falta
             if (mainMenuButton == null)
             {
                 var bGO = new GameObject("MainMenuButton");
@@ -162,7 +165,6 @@ public class GameOverManager : MonoBehaviour
             return;
         }
 
-        // Si no existe gameOverUI, crear una UI básica por código
         gameOverUI = new GameObject("GameOverUI");
         var canvas = gameOverUI.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -175,7 +177,6 @@ public class GameOverManager : MonoBehaviour
         gameOverUI.AddComponent<GraphicRaycaster>();
         DontDestroyOnLoad(gameOverUI);
 
-        // Asegurar que haya un EventSystem en la escena (necesario para que los botones respondan)
         if (FindObjectOfType<EventSystem>() == null)
         {
             var esGO = new GameObject("EventSystem");
@@ -184,7 +185,6 @@ public class GameOverManager : MonoBehaviour
             DontDestroyOnLoad(esGO);
         }
 
-        // Panel
         var panelGO2 = new GameObject("Panel");
         panelGO2.transform.SetParent(gameOverUI.transform, false);
         var panelImg2 = panelGO2.AddComponent<Image>();
@@ -195,7 +195,6 @@ public class GameOverManager : MonoBehaviour
         panelRt2.offsetMin = Vector2.zero;
         panelRt2.offsetMax = Vector2.zero;
 
-        // Texto TMP
         var textGO = new GameObject("ResultadoText");
         textGO.transform.SetParent(panelGO2.transform, false);
         var tmp2 = textGO.AddComponent<TextMeshProUGUI>();
@@ -210,7 +209,6 @@ public class GameOverManager : MonoBehaviour
         textRt.offsetMax = Vector2.zero;
         resultadoText = tmp2;
 
-        // Botón Menú Principal
         var btnMenuGO = new GameObject("MainMenuButton");
         btnMenuGO.transform.SetParent(panelGO2.transform, false);
         var btnMenuImg = btnMenuGO.AddComponent<Image>();
@@ -238,7 +236,6 @@ public class GameOverManager : MonoBehaviour
         mainMenuButton = btnMenu;
         mainMenuButton.onClick.AddListener(IrAlMenuPrincipal);
 
-        // Botón Reiniciar
         var btnGO2 = new GameObject("ReiniciarButton");
         btnGO2.transform.SetParent(panelGO2.transform, false);
         var btnImg2 = btnGO2.AddComponent<Image>();
@@ -269,9 +266,9 @@ public class GameOverManager : MonoBehaviour
         gameOverUI.SetActive(false);
     }
 
+    // Elimina UI persistente creada por este manager y restaura estado de input/tiempo.
     private void CleanupPersistentUI(bool restoreInputAndTime = true)
     {
-        // Si la UI fue marcada DontDestroyOnLoad, eliminarla antes de recargar la escena para evitar que persista.
         if (gameOverUI != null)
         {
             try { gameOverUI.SetActive(false); } catch { }
@@ -282,43 +279,35 @@ public class GameOverManager : MonoBehaviour
             mainMenuButton = null;
         }
 
-        // Restaurar estado por defecto del cursor/tiempo (por si acaso)
         if (restoreInputAndTime)
         {
             Time.timeScale = 1f;
             Cursor.visible = false;
             Cursor.lockState = CursorLockMode.Locked;
-
-            // Reset bandera para permitir mostrar UI en la nueva escena
             gameEnded = false;
         }
     }
 
+    // Restaura estado de entrada tras cargar escena.
     private void RestoreInputState()
     {
-        // Llamar después de cargar la escena para restaurar el estado de entrada
         Time.timeScale = 1f;
         Cursor.visible = false;
         Cursor.lockState = CursorLockMode.Locked;
         gameEnded = false;
     }
 
+    // Reinicia la escena actual.
     public void ReiniciarJuego()
     {
-        // Limpiar UI persistente antes de recargar para que el panel no quede en pantalla,
-        // pero no ocultar el cursor hasta después de cargar la escena para evitar desaparición inmediata.
         CleanupPersistentUI(false);
-
-        // Cargar de nuevo la misma escena (sincrónico)
         SceneManager.LoadScene(SceneManager.GetActiveScene().name);
-
-        // Restaurar estado de entrada ahora que la escena está cargada
         RestoreInputState();
     }
 
+    // Carga la escena del menú principal.
     public void IrAlMenuPrincipal()
     {
-        // Limpiar UI persistente antes de cambiar de escena
         CleanupPersistentUI(false);
 
         if (!string.IsNullOrEmpty(mainMenuSceneName))
@@ -330,7 +319,6 @@ public class GameOverManager : MonoBehaviour
             SceneManager.LoadScene(0);
         }
 
-        // Restaurar estado de entrada ahora que la escena está cargada
         RestoreInputState();
     }
 }
