@@ -1,18 +1,20 @@
 using UnityEngine;
 
-// Componente marcador para la zona de salida.
-// Ahora con fallback por trigger para notificar al TurnBasedManager.
+/*
+GameObject: ExitZone (attach to a trigger inside a MazeCell)
+Descripción: Detecta la entrada de un Character y notifica al TurnBasedManager la salida.
+*/
+
 public class ExitZone : MonoBehaviour
 {
+    // OnTriggerEnter: detecta Character que entra y notifica al manager.
     private void OnTriggerEnter(Collider other)
     {
-        // Intentar localizar un Character en el collider entrante
         Character c = other.GetComponent<Character>() ?? other.GetComponentInParent<Character>() ?? other.GetComponentInChildren<Character>();
         if (c == null) return;
 
         Debug.Log($"[ExitZone] Detected Character '{c.name}' entering exit trigger. Notifying manager.");
 
-        // Preferir el manager referencia del propio Character (si existe), sino buscar uno en escena
         if (c.manager != null)
         {
             c.manager.PlayerExited(c);

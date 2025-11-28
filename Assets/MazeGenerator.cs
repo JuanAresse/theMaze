@@ -3,34 +3,36 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
+/*
+GameObject: MazeGenerator (attach to an empty GameObject in the level)
+Descripción: Genera la rejilla de MazeCell, define entradas/salida, spawnea powerups y characters.
+*/
+
 public class MazeGenerator : MonoBehaviour
 {
     [SerializeField] private MazeCell _mazeCellPrefab;
     [SerializeField] private int _mazeWidth;
     [SerializeField] private int _mazeDepth;
-    [SerializeField] private GameObject _characterPrefab; // Prefab con el componente Character
+    [SerializeField] private GameObject _characterPrefab;
     [SerializeField] private CamaraTerceraPersona _cameraP1Controller;
     [SerializeField] private CamaraTerceraPersona _cameraP2Controller;
 
-    // Añade aquí los modelos (asignar desde Inspector)
     [SerializeField] private GameObject _player1ModelPrefab;
     [SerializeField] private GameObject _player2ModelPrefab;
 
-    // Prefabs opcionales de powerups (si no se asignan, se generará un visual simple)
     [SerializeField] private GameObject _powerupPhasePrefab;
     [SerializeField] private GameObject _powerupTrueRadarPrefab;
 
-    private MazeCell[,] _mazeGrid;
+    private MazeCell[,] _mazeGrid;                                                                      
 
-    // Entrada exterior (esquinas) y spawn según petición
     private Vector2Int _entryPosA = new Vector2Int(0, 0);
     private Vector2Int _entryPosB = new Vector2Int(0, 0);
     private Vector2Int _spawnPosA = new Vector2Int(0, 0);
     private Vector2Int _spawnPosB = new Vector2Int(0, 0);
 
-    // Única salida del laberinto
     private Vector2Int _exitPos = new Vector2Int(0, 0);
 
+    // Start: validaciones iniciales, instancia de celdas y generación completa.
     void Start()
     {
         if (_mazeCellPrefab == null)
@@ -59,15 +61,14 @@ public class MazeGenerator : MonoBehaviour
 
         GenerateMaze(null, _mazeGrid[0, 0]);
 
-        // Spawns exactos en esquinas y una única salida en la pared contraria
         DefineEntranceAndExit();
 
-        // Spawn de powerups: generamos countEach basado en el "largo" / 4 (ver explicación)
         SpawnPowerups();
 
         SetupCharacters();
     }
 
+    // GenerateMaze: genera recursivamente el laberinto marcando visitas y quitando muros.
     private void GenerateMaze(MazeCell previousCell, MazeCell currentCell)
     {
         currentCell.Visit();
@@ -81,12 +82,14 @@ public class MazeGenerator : MonoBehaviour
         } while (nextCell != null);
     }
 
+    // Obtiene una celda adyacente no visitada aleatoria.
     private MazeCell GetNextUnvisitedCell(MazeCell currentCell)
     {
         var unvisitedCells = GetUnvisitedCells(currentCell);
         return unvisitedCells.OrderBy(_ => Random.Range(1, 10)).FirstOrDefault();
     }
 
+    // Itera celdas adyacentes no visitadas.
     private IEnumerable<MazeCell> GetUnvisitedCells(MazeCell currentCell)
     {
         int x = (int)currentCell.transform.position.x;
@@ -114,6 +117,7 @@ public class MazeGenerator : MonoBehaviour
         }
     }
 
+    // ClearWalls: quita muros entre previousCell y currentCell según su posición relativa.
     private void ClearWalls(MazeCell previousCell, MazeCell currentCell)
     {
         if (previousCell == null) return;
@@ -144,12 +148,12 @@ public class MazeGenerator : MonoBehaviour
         }
     }
 
-    /// Define las entradas en las esquinas (entryPos) y spawns en las esquinas.
+    // DefineEntranceAndExit: determina entradas/spawns en esquinas y crea ExitZone en la celda salida.
     private void DefineEntranceAndExit()
     {
         int axisChoice = Random.Range(0, 2);
 
-        if (axisChoice == 0) // izquierda/derecha
+        if (axisChoice == 0)
         {
             int entrySide = Random.Range(0, 2);
             if (entrySide == 0)
@@ -173,7 +177,7 @@ public class MazeGenerator : MonoBehaviour
                 _mazeGrid[_exitPos.x, _exitPos.y].ClearLeftWall();
             }
         }
-        else // inferior/superior
+        else
         {
             int entrySide = Random.Range(0, 2);
             if (entrySide == 0)
@@ -200,25 +204,21 @@ public class MazeGenerator : MonoBehaviour
 
         Debug.Log($"Entradas (exteriores): A={_entryPosA} B={_entryPosB}  Spawns: A={_spawnPosA} B={_spawnPosB}  Salida: {_exitPos}");
 
-        // Crear una zona trigger dentro de la celda de salida para detectar la salida cuando el personaje
-        // entre en esa celda. No dependemos únicamente de tags para evitar errores si la tag no existe.
         var exitCell = _mazeGrid[_exitPos.x, _exitPos.y];
         if (exitCell != null)
         {
             var exitGO = new GameObject("ExitZone");
             exitGO.transform.SetParent(exitCell.transform, false);
-            // Centrado en la celda, altura 0.5 (ajusta si tu collider del personaje está a diferente Y)
             exitGO.transform.localPosition = new Vector3(0f, 0.5f, 0f);
             var box = exitGO.AddComponent<BoxCollider>();
             box.isTrigger = true;
-            // Tamaño ligeramente menor que la celda para evitar colisiones con muros
             box.size = new Vector3(0.9f, 1f, 0.9f);
             exitGO.AddComponent<ExitZone>();
-            // Intentar asignar la tag "Exit" si existe (no obligatorio)
-            try { exitGO.tag = "Exit"; } catch (UnityException) { /* tag no definida: OK */ }
+            try { exitGO.tag = "Exit"; } catch (UnityException) { }
         }
     }
 
+    // SetupCharacters: instancia prefabs de Character, asigna modelos, cámaras y manager.
     private void SetupCharacters()
     {
         if (_characterPrefab == null)
@@ -242,7 +242,6 @@ public class MazeGenerator : MonoBehaviour
             return;
         }
 
-        // Instanciar modelos si están asignados y adjuntar como visual al Character
         if (_player1ModelPrefab != null)
         {
             var modelA = Instantiate(_player1ModelPrefab, goA.transform, false);
@@ -254,15 +253,12 @@ public class MazeGenerator : MonoBehaviour
             charB.AttachVisual(modelB);
         }
 
-        // Inicializar characters con la rejilla y posición BEFORE manager.Initialize
         charA.Init(_mazeGrid, posA, "Jugador A");
         charB.Init(_mazeGrid, posB, "Jugador B");
 
-        // Asignar objetivo a controladores de cámara (si están) para centrar cámaras en los personajes
         if (_cameraP1Controller != null) _cameraP1Controller.objetivo = goA.transform;
         if (_cameraP2Controller != null) _cameraP2Controller.objetivo = goB.transform;
 
-        // Determinar cámaras a usar para el manager
         Camera camA = null;
         Camera camB = null;
         if (_cameraP1Controller != null)
@@ -274,7 +270,6 @@ public class MazeGenerator : MonoBehaviour
             camB = _cameraP2Controller.GetComponent<Camera>() ?? _cameraP2Controller.GetComponentInChildren<Camera>();
         }
 
-        // Fallback robusto a Camera.allCameras
         var cams = Camera.allCameras;
         if (camA == null || camB == null)
         {
@@ -345,18 +340,16 @@ public class MazeGenerator : MonoBehaviour
         Debug.Log($"Personajes configurados: {charA.name} en {posA} , {charB.name} en {posB}");
     }
 
+    // SpawnPowerups: calcula posiciones válidas y spawnea powerups Phase y TrueRadar.
     private void SpawnPowerups()
     {
-        // Ahora se calcula countEach usando el "largo" dividido por 4.
-        // Interpretación: usamos _mazeWidth / 4. Ejemplo: width=8 -> 8/4 = 2.
-        int countEach = _mazeWidth / 4; // puede ser 0 si el laberinto es pequeño
+        int countEach = _mazeWidth / 4;
 
         var forbidden = new HashSet<Vector2Int>();
         forbidden.Add(_spawnPosA);
         forbidden.Add(_spawnPosB);
         forbidden.Add(_exitPos);
 
-        // Recopilar todas las celdas válidas
         var candidates = new List<Vector2Int>();
         for (int x = 0; x < _mazeWidth; x++)
         {
@@ -368,7 +361,6 @@ public class MazeGenerator : MonoBehaviour
             }
         }
 
-        // Mezclar
         for (int i = 0; i < candidates.Count; i++)
         {
             int j = Random.Range(i, candidates.Count);
@@ -378,13 +370,11 @@ public class MazeGenerator : MonoBehaviour
         }
 
         int idx = 0;
-        // Spawn Phase powerups
         for (int k = 0; k < countEach && idx < candidates.Count; k++, idx++)
         {
             var pos = candidates[idx];
             SpawnPowerupAt(pos, Powerup.PowerupType.Phase);
         }
-        // Spawn TrueRadar powerups
         for (int k = 0; k < countEach && idx < candidates.Count; k++, idx++)
         {
             var pos = candidates[idx];
@@ -394,6 +384,7 @@ public class MazeGenerator : MonoBehaviour
         Debug.Log($"Spawned {countEach} Phase and {countEach} TrueRadar powerups (mazeWidth={_mazeWidth}, mazeDepth={_mazeDepth}).");
     }
 
+    // SpawnPowerupAt: crea un powerup en la celda indicada.
     private void SpawnPowerupAt(Vector2Int cellPos, Powerup.PowerupType type)
     {
         var cell = _mazeGrid[cellPos.x, cellPos.y];
@@ -404,25 +395,22 @@ public class MazeGenerator : MonoBehaviour
         else prefab = _powerupTrueRadarPrefab;
 
         GameObject go;
-        float spawnY = 0.5f; // alinear con la altura del Character (fixedHeight)
+        float spawnY = 0.5f;
         if (prefab != null)
         {
             go = Instantiate(prefab, new Vector3(cellPos.x, spawnY, cellPos.y), Quaternion.identity);
         }
         else
         {
-            // Crear visual simple en runtime (centro en spawnY)
             go = GameObject.CreatePrimitive(PrimitiveType.Cube);
             go.transform.position = new Vector3(cellPos.x, spawnY, cellPos.y);
             go.transform.localScale = new Vector3(0.6f, 0.2f, 0.6f);
         }
 
-        // Añadir componente Powerup si no existe y configurar
         var p = go.GetComponent<Powerup>();
         if (p == null) p = go.AddComponent<Powerup>();
         p.Type = (type == Powerup.PowerupType.Phase) ? Powerup.PowerupType.Phase : Powerup.PowerupType.TrueRadar;
 
-        // Ajustar visual/color si no hay prefab
         var mr = go.GetComponent<MeshRenderer>();
         if (mr != null)
         {
@@ -430,10 +418,8 @@ public class MazeGenerator : MonoBehaviour
             else mr.material.color = Color.magenta;
         }
 
-        // Parentear bajo la celda para organización
         go.transform.SetParent(cell.transform, true);
 
-        // Asegurar collider isTrigger
         var col = go.GetComponent<Collider>();
         if (col == null) { var bc = go.AddComponent<BoxCollider>(); bc.isTrigger = true; }
         else col.isTrigger = true;
