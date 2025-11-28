@@ -10,10 +10,12 @@ public class ControlMenu : MonoBehaviour
 {
     [Header("Escenas")]
     [SerializeField] private string gameplaySceneName = "The maze";
+    [SerializeField] private string mainMenuSceneName = "MENU";
     [SerializeField] private string savedScenePlayerPrefKey = "SavedScene";
 
 #if UNITY_EDITOR
     [SerializeField] private SceneAsset gameplaySceneAsset = null;
+    [SerializeField] private SceneAsset mainMenuSceneAsset = null;
 #endif
 
     [Header("Paneles UI (asignar en el Inspector)")]
@@ -36,6 +38,8 @@ public class ControlMenu : MonoBehaviour
 #if UNITY_EDITOR
         if (gameplaySceneAsset != null)
             gameplaySceneName = gameplaySceneAsset.name;
+        if (mainMenuSceneAsset != null)
+            mainMenuSceneName = mainMenuSceneAsset.name;
 #endif
 
         if (persistBetweenScenes)
@@ -256,5 +260,27 @@ public class ControlMenu : MonoBehaviour
         if (pausePanel != null) pausePanel.SetActive(true);
         isPaused = true;
         Time.timeScale = 0f;
+    }
+
+    
+    public void BackToMainMenuScene()
+    {
+        if (string.IsNullOrEmpty(mainMenuSceneName))
+        {
+            Debug.LogWarning("ControlMenu: el nombre de la escena del menu principal no está configurado.");
+            return;
+        }
+        if (TryResolveSceneNameInBuild(mainMenuSceneName, out string resolved))
+        {
+            // Aseguramos que el juego no quede pausado al cargar el menú principal
+            Time.timeScale = 1f;
+            isPaused = false;
+            Cursor.visible = true;
+            Cursor.lockState = CursorLockMode.None;
+
+            SceneManager.LoadScene(resolved);
+            return;
+        }
+        Debug.LogError($"No se encontró la escena '{mainMenuSceneName}' en Build Settings.");
     }
 }
